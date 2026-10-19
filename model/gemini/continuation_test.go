@@ -346,82 +346,32 @@ func TestContinuation_GenerateStreamKeepsMetadata(t *testing.T) {
 	checkRequests(t, api, []string{"", "t1", "t2"})
 }
 
-// TestContinuation_ResumesOnlyContinuationStops checks that a MAX_TOKENS stop
-// is returned as it is wherever it falls in the generation, and that a
-// CONTINUATION stop is resumed whatever maxOutputTokens says.
-func TestContinuation_ResumesOnlyContinuationStops(t *testing.T) {
-	tests := []struct {
-		name            string
-		maxOutputTokens int32
-		byToken         map[string][]map[string]any
-		wantTokens      []string
-		wantReason      genai.FinishReason
-	}{
-		{
-			name: "MAX_TOKENS after CONTINUATION",
-			byToken: map[string][]map[string]any{
+// TestContinuation_MaxTokensNotResumed checks that a MAX_TOKENS stop that
+// carries a token is returned as it is, even after a CONTINUATION pause was
+// resumed, since resuming it makes the API return a 400.
+func TestContinuation_MaxTokensNotResumed(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		t.Run(fmt.Sprintf("stream=%t", stream), func(t *testing.T) {
+			api := &fakeContinuationAPI{byToken: map[string][]map[string]any{
 				"":   {candidate("one ", "CONTINUATION", "t1")},
 				"t1": {candidate("two", "MAX_TOKENS", "t2")},
-			},
-			wantTokens: []string{"", "t1"},
-			wantReason: genai.FinishReasonMaxTokens,
-		},
-		{
-			name:            "CONTINUATION with maxOutputTokens",
-			maxOutputTokens: 100,
-			byToken: map[string][]map[string]any{
-				"":   {candidate("one ", "CONTINUATION", "t1")},
-				"t1": {candidate("two", "STOP", "")},
-			},
-			wantTokens: []string{"", "t1"},
-			wantReason: genai.FinishReasonStop,
-		},
-		{
-			name:            "MAX_TOKENS with maxOutputTokens",
-			maxOutputTokens: 100,
-			byToken: map[string][]map[string]any{
-				"":   {candidate("one", "MAX_TOKENS", "t1")},
-				"t1": {candidate("two", "STOP", "")},
-			},
-			wantTokens: []string{""},
-			wantReason: genai.FinishReasonMaxTokens,
-		},
-		{
-			name:            "MAX_TOKENS after CONTINUATION with maxOutputTokens",
-			maxOutputTokens: 100,
-			byToken: map[string][]map[string]any{
-				"":   {candidate("one ", "CONTINUATION", "t1")},
-				"t1": {candidate("two", "MAX_TOKENS", "t2")},
-			},
-			wantTokens: []string{"", "t1"},
-			wantReason: genai.FinishReasonMaxTokens,
-		},
-	}
-	for _, tt := range tests {
-		for _, stream := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/stream=%t", tt.name, stream), func(t *testing.T) {
-				api := &fakeContinuationAPI{byToken: tt.byToken}
-				req := continuationRequest()
-				if tt.maxOutputTokens != 0 {
-					req.Config = &genai.GenerateContentConfig{MaxOutputTokens: tt.maxOutputTokens}
+			}}
+			var final *model.LLMResponse
+			for resp, err := range newContinuationModel(t, api).GenerateContent(t.Context(), continuationRequest(), stream) {
+				if err != nil {
+					t.Fatalf("GenerateContent: %v", err)
 				}
-				var final *model.LLMResponse
-				for resp, err := range newContinuationModel(t, api).GenerateContent(t.Context(), req, stream) {
-					if err != nil {
-						t.Fatalf("GenerateContent: %v", err)
-					}
-					if !resp.Partial {
-						final = resp
-					}
+				if !resp.Partial {
+					final = resp
 				}
-				if final == nil {
-					t.Fatal("no final response")
-				}
-				if final.FinishReason != tt.wantReason {
-					t.Errorf("finish reason = %q, want %q", final.FinishReason, tt.wantReason)
-				}
-				checkRequests(t, api, tt.wantTokens)
-			})
-		}
+			}
+			if final == nil {
+				t.Fatal("no final response")
+			}
+			if final.FinishReason != genai.FinishReasonMaxTokens {
+				t.Errorf("finish reason = %q, want %q", final.FinishReason, genai.FinishReasonMaxTokens)
+			}
+			checkRequests(t, api, []string{"", "t1"})
+		})
 	}
 }
