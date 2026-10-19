@@ -52,6 +52,12 @@ func RequestConfirmationRequestProcessor(ctx agent.InvocationContext, req *model
 				events = append(events, e)
 			}
 		}
+		responseLatestIndex := make(map[string]int)
+		for idx, ev := range events {
+			for _, resp := range utils.FunctionResponses(ev.Content) {
+				responseLatestIndex[resp.ID] = idx
+			}
+		}
 		confirmationResponses := make(map[string]toolconfirmation.ToolConfirmation)
 		for k := len(events) - 1; k >= 0; k-- {
 			event := events[k]
@@ -211,19 +217,10 @@ func RequestConfirmationRequestProcessor(ctx agent.InvocationContext, req *model
 				continue
 			}
 
-			// TODO consider forward or backward pass instead of nested loops
 			// Remove the tools that already have a result after their request, even if it precedes the latest user event (repeated approvals).
-			for j := len(events) - 1; j > k; j-- {
-				event = events[j]
-				responses := utils.FunctionResponses(event.Content)
-				if len(responses) == 0 {
-					continue
-				}
-				for _, resp := range responses {
-					delete(toolsToResumeByFunctionCallID, resp.ID)
-				}
-				if len(toolsToResumeByFunctionCallID) == 0 {
-					break
+			for callID := range toolsToResumeByFunctionCallID {
+				if idx, ok := responseLatestIndex[callID]; ok && idx > k {
+					delete(toolsToResumeByFunctionCallID, callID)
 				}
 			}
 			if len(toolsToResumeByFunctionCallID) == 0 {
