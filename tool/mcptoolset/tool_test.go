@@ -16,7 +16,6 @@ package mcptoolset
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -741,7 +740,11 @@ func TestMCPToolRunStructuredContentKeepsContentBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if s := fmt.Sprint(got); !strings.Contains(s, "package example") {
-		t.Errorf("Run() result dropped the embedded resource content blocks when StructuredContent is set (got %T)", got)
+	content, ok := got["content"].(string)
+	if !ok {
+		t.Fatalf("Run() result missing 'content' key or not a string (got: %+v)", got)
+	}
+	if !strings.Contains(content, "package example") {
+		t.Errorf("Run() content = %q, want to contain %q", content, "package example")
 	}
 }
